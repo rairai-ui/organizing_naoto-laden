@@ -1,0 +1,34 @@
+# Secrets
+.env
+.env.local
+.env.*.local
+!.env.example
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+.Python
+
+# Data / DB / Vector store
+*.db
+*.sqlite
+*.sqlite3
+chroma/
+
+# Audio / video uploads
+*.mp3
+*.wav
+*.m4a
+*.ogg
+*.flac
+*.webm
+*.mp4
+
+# Editor / OS
+.DS_Store
+.vscode/
+.idea/
+*.swp
