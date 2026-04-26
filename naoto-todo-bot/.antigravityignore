@@ -1,0 +1,10 @@
+.env
+*.db
+chroma/
+*.mp3
+*.wav
+*.m4a
+*.ogg
+*.flac
+*.webm
+*.mp4
