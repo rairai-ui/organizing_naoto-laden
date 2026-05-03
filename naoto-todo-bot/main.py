@@ -87,7 +87,12 @@ async def input_voice(
             pdf_path = tmp_pdf.name
 
     try:
-        transcription = ai.transcribe(audio_path, pdf_path)
+        try:
+            transcription = ai.transcribe(audio_path, pdf_path)
+        except HTTPException:
+            raise
+        except Exception as e:
+            raise HTTPException(500, f"文字起こしエラー: {e}") from e
         if not transcription:
             raise HTTPException(500, "文字起こしに失敗しました")
 

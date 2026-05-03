@@ -17,13 +17,19 @@ def _model(system_instruction=None):
     return genai.GenerativeModel(MODEL_NAME, system_instruction=system_instruction)
 
 
-def _wait_file_active(file, timeout=60):
+def _wait_file_active(file, timeout=180):
     start = time.time()
     while file.state.name == "PROCESSING":
         if time.time() - start > timeout:
-            break
-        time.sleep(1)
+            raise RuntimeError(
+                f"Geminiファイル {file.name} が {timeout}秒以内にACTIVEになりませんでした（最終状態: PROCESSING）"
+            )
+        time.sleep(2)
         file = genai.get_file(file.name)
+    if file.state.name != "ACTIVE":
+        raise RuntimeError(
+            f"Geminiファイル {file.name} がACTIVEになりませんでした（最終状態: {file.state.name}）"
+        )
     return file
 
 
