@@ -9,7 +9,7 @@ API_KEY = os.getenv("GEMINI_API_KEY", "")
 if API_KEY:
     genai.configure(api_key=API_KEY)
 
-MODEL_NAME = os.getenv("GEMINI_MODEL", "gemini-flash-latest")
+MODEL_NAME = os.getenv("GEMINI_MODEL", "gemini-2.5-flash")
 EMBED_MODEL = os.getenv("GEMINI_EMBED_MODEL", "models/gemini-embedding-001")
 
 
