@@ -1,9 +1,12 @@
 import json
 import os
 import re
+import subprocess
 import time
+from pathlib import Path
 
 import google.generativeai as genai
+import imageio_ffmpeg
 
 API_KEY = os.getenv("GEMINI_API_KEY", "")
 if API_KEY:
@@ -33,9 +36,39 @@ def _wait_file_active(file, timeout=180):
     return file
 
 
+# Gemini Files API がそのまま受け付ける音声拡張子
+_GEMINI_AUDIO_EXTS = {".wav", ".mp3", ".aiff", ".aac", ".ogg", ".flac"}
+
+
+def _ensure_gemini_audio(path):
+    ext = Path(path).suffix.lower()
+    if ext in _GEMINI_AUDIO_EXTS:
+        return path, None
+    out_path = str(Path(path).with_suffix(".wav"))
+    ffmpeg = imageio_ffmpeg.get_ffmpeg_exe()
+    proc = subprocess.run(
+        [ffmpeg, "-y", "-i", path, "-vn", "-ac", "1", "-ar", "16000", out_path],
+        capture_output=True,
+    )
+    if proc.returncode != 0:
+        raise RuntimeError(
+            "音声ファイルの変換に失敗しました: "
+            + (proc.stderr.decode("utf-8", errors="replace")[-500:] or "unknown error")
+        )
+    return out_path, out_path
+
+
 def transcribe(audio_path, pdf_path=None):
-    audio_file = genai.upload_file(audio_path)
-    audio_file = _wait_file_active(audio_file)
+    audio_path, transcoded_path = _ensure_gemini_audio(audio_path)
+    try:
+        audio_file = genai.upload_file(audio_path)
+        audio_file = _wait_file_active(audio_file)
+    finally:
+        if transcoded_path:
+            try:
+                os.unlink(transcoded_path)
+            except OSError:
+                pass
     parts = [audio_file]
     if pdf_path:
         pdf_file = genai.upload_file(pdf_path)
