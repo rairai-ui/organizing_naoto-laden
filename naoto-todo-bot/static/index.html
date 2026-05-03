@@ -292,13 +292,6 @@
   <section class="screen" id="screen-home">
     <h2>インプット</h2>
     <div class="card">
-      <div class="label">音声録音</div>
-      <div class="row">
-        <button id="recordBtn">🎙️ 録音開始</button>
-        <span id="recordStatus" style="font-size:12px; color:#7f8c8d;"></span>
-      </div>
-    </div>
-    <div class="card">
       <div class="label">音声ファイル</div>
       <input type="file" id="audioFile" accept="audio/*">
     </div>
@@ -379,39 +372,6 @@ document.querySelectorAll('nav a').forEach(a => {
   a.addEventListener('click', e => { e.preventDefault(); location.hash = '#' + a.dataset.screen; });
 });
 
-// ---------- 録音 ----------
-let mediaRecorder = null;
-let recordedChunks = [];
-let recordedBlob = null;
-const recordBtn = document.getElementById('recordBtn');
-const recordStatus = document.getElementById('recordStatus');
-
-recordBtn.addEventListener('click', async () => {
-  if (mediaRecorder && mediaRecorder.state === 'recording') {
-    mediaRecorder.stop();
-    return;
-  }
-  try {
-    const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-    recordedChunks = [];
-    mediaRecorder = new MediaRecorder(stream);
-    mediaRecorder.ondataavailable = e => { if (e.data.size > 0) recordedChunks.push(e.data); };
-    mediaRecorder.onstop = () => {
-      recordedBlob = new Blob(recordedChunks, { type: 'audio/webm' });
-      recordBtn.textContent = '🎙️ 録音開始';
-      recordBtn.classList.remove('recording');
-      recordStatus.textContent = `録音完了 (${(recordedBlob.size / 1024).toFixed(1)} KB)`;
-      stream.getTracks().forEach(t => t.stop());
-    };
-    mediaRecorder.start();
-    recordBtn.textContent = '⏹️ 停止';
-    recordBtn.classList.add('recording');
-    recordStatus.textContent = '録音中...';
-  } catch (err) {
-    alert('マイクへのアクセスに失敗しました: ' + err.message);
-  }
-});
-
 // ---------- 送信（音声・テキスト） ----------
 const submitBtn = document.getElementById('submitBtn');
 submitBtn.addEventListener('click', async () => {
@@ -420,7 +380,7 @@ submitBtn.addEventListener('click', async () => {
   const pdfFile = document.getElementById('pdfFile').files[0];
   const result = document.getElementById('result');
 
-  const audio = audioFile || (recordedBlob ? new File([recordedBlob], 'recording.webm', { type: 'audio/webm' }) : null);
+  const audio = audioFile || null;
 
   if (!audio && !text) {
     alert('音声・テキストのどちらか1つ以上を入力してください');
@@ -469,8 +429,6 @@ submitBtn.addEventListener('click', async () => {
     document.getElementById('textInput').value = '';
     document.getElementById('audioFile').value = '';
     document.getElementById('pdfFile').value = '';
-    recordedBlob = null;
-    recordStatus.textContent = '';
   } catch (e) {
     result.textContent = 'エラー: ' + e.message;
   } finally {
