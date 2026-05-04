@@ -1,17 +1,17 @@
 import os
-import sqlite3
 import uuid
 from contextlib import contextmanager
-from pathlib import Path
 
-DATA_DIR = os.getenv("DATA_DIR", ".")
-DB_PATH = Path(DATA_DIR) / "naoto.db"
+import psycopg2
+import psycopg2.extras
+
+DATABASE_URL = os.getenv("DATABASE_URL", "")
 
 
 def init_db():
-    Path(DATA_DIR).mkdir(parents=True, exist_ok=True)
     with get_conn() as conn:
-        conn.execute(
+        _execute(
+            conn,
             """
             CREATE TABLE IF NOT EXISTS memories (
                 id TEXT PRIMARY KEY,
@@ -20,11 +20,12 @@ def init_db():
                 summary TEXT,
                 source_filename TEXT,
                 chroma_id TEXT,
-                created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
-            """
+            """,
         )
-        conn.execute(
+        _execute(
+            conn,
             """
             CREATE TABLE IF NOT EXISTS todos (
                 id TEXT PRIMARY KEY,
@@ -34,30 +35,51 @@ def init_db():
                 priority TEXT DEFAULT 'medium',
                 due_date DATE,
                 memory_id TEXT,
-                completed_at DATETIME,
+                completed_at TIMESTAMP,
                 completion_note TEXT,
-                created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
-            """
+            """,
         )
 
 
 @contextmanager
 def get_conn():
-    conn = sqlite3.connect(str(DB_PATH))
-    conn.row_factory = sqlite3.Row
+    conn = psycopg2.connect(DATABASE_URL)
     try:
         yield conn
         conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
     finally:
         conn.close()
+
+
+def _execute(conn, sql, params=()):
+    with conn.cursor() as cur:
+        cur.execute(sql, params)
+
+
+def _fetchone(conn, sql, params=()):
+    with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+        cur.execute(sql, params)
+        row = cur.fetchone()
+        return dict(row) if row else None
+
+
+def _fetchall(conn, sql, params=()):
+    with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+        cur.execute(sql, params)
+        return [dict(r) for r in cur.fetchall()]
 
 
 def create_memory(type_, content, summary=None, source_filename=None, chroma_id=None):
     mid = str(uuid.uuid4())
     with get_conn() as conn:
-        conn.execute(
-            "INSERT INTO memories (id, type, content, summary, source_filename, chroma_id) VALUES (?, ?, ?, ?, ?, ?)",
+        _execute(
+            conn,
+            "INSERT INTO memories (id, type, content, summary, source_filename, chroma_id) VALUES (%s, %s, %s, %s, %s, %s)",
             (mid, type_, content, summary, source_filename, chroma_id),
         )
     return mid
@@ -65,8 +87,9 @@ def create_memory(type_, content, summary=None, source_filename=None, chroma_id=
 
 def set_memory_chroma_id(memory_id, chroma_id):
     with get_conn() as conn:
-        conn.execute(
-            "UPDATE memories SET chroma_id = ? WHERE id = ?",
+        _execute(
+            conn,
+            "UPDATE memories SET chroma_id = %s WHERE id = %s",
             (chroma_id, memory_id),
         )
 
@@ -75,43 +98,42 @@ def get_memories_by_ids(ids):
     if not ids:
         return []
     with get_conn() as conn:
-        placeholders = ",".join("?" * len(ids))
-        rows = conn.execute(
-            f"SELECT * FROM memories WHERE id IN ({placeholders})", list(ids)
-        ).fetchall()
-        return [dict(r) for r in rows]
+        placeholders = ",".join(["%s"] * len(ids))
+        return _fetchall(
+            conn,
+            f"SELECT * FROM memories WHERE id IN ({placeholders})",
+            list(ids),
+        )
 
 
 def create_todo(title, description=None, priority="medium", due_date=None, memory_id=None, status="pending"):
     tid = str(uuid.uuid4())
     with get_conn() as conn:
-        conn.execute(
-            "INSERT INTO todos (id, title, description, status, priority, due_date, memory_id) VALUES (?, ?, ?, ?, ?, ?, ?)",
+        _execute(
+            conn,
+            "INSERT INTO todos (id, title, description, status, priority, due_date, memory_id) VALUES (%s, %s, %s, %s, %s, %s, %s)",
             (tid, title, description, status, priority, due_date, memory_id),
         )
-        row = conn.execute("SELECT * FROM todos WHERE id = ?", (tid,)).fetchone()
-        return dict(row)
+        return _fetchone(conn, "SELECT * FROM todos WHERE id = %s", (tid,))
 
 
 def list_todos(status=None, priority=None):
     sql = "SELECT * FROM todos WHERE 1=1"
     params = []
     if status:
-        sql += " AND status = ?"
+        sql += " AND status = %s"
         params.append(status)
     if priority:
-        sql += " AND priority = ?"
+        sql += " AND priority = %s"
         params.append(priority)
     sql += " ORDER BY (due_date IS NULL), due_date ASC, created_at DESC"
     with get_conn() as conn:
-        rows = conn.execute(sql, params).fetchall()
-        return [dict(r) for r in rows]
+        return _fetchall(conn, sql, params)
 
 
 def get_todo(id_):
     with get_conn() as conn:
-        row = conn.execute("SELECT * FROM todos WHERE id = ?", (id_,)).fetchone()
-        return dict(row) if row else None
+        return _fetchone(conn, "SELECT * FROM todos WHERE id = %s", (id_,))
 
 
 def update_todo(id_, **fields):
@@ -119,24 +141,23 @@ def update_todo(id_, **fields):
     sets = {k: v for k, v in fields.items() if k in allowed and v is not None}
     if not sets:
         return get_todo(id_)
-    cols = ", ".join(f"{k} = ?" for k in sets)
+    cols = ", ".join(f"{k} = %s" for k in sets)
     params = list(sets.values()) + [id_]
     with get_conn() as conn:
-        conn.execute(f"UPDATE todos SET {cols} WHERE id = ?", params)
-        row = conn.execute("SELECT * FROM todos WHERE id = ?", (id_,)).fetchone()
-        return dict(row) if row else None
+        _execute(conn, f"UPDATE todos SET {cols} WHERE id = %s", params)
+        return _fetchone(conn, "SELECT * FROM todos WHERE id = %s", (id_,))
 
 
 def delete_todo(id_):
     with get_conn() as conn:
-        conn.execute("DELETE FROM todos WHERE id = ?", (id_,))
+        _execute(conn, "DELETE FROM todos WHERE id = %s", (id_,))
 
 
 def complete_todo(id_, completion_note=None):
     with get_conn() as conn:
-        conn.execute(
-            "UPDATE todos SET status = 'done', completed_at = CURRENT_TIMESTAMP, completion_note = ? WHERE id = ?",
+        _execute(
+            conn,
+            "UPDATE todos SET status = 'done', completed_at = CURRENT_TIMESTAMP, completion_note = %s WHERE id = %s",
             (completion_note, id_),
         )
-        row = conn.execute("SELECT * FROM todos WHERE id = ?", (id_,)).fetchone()
-        return dict(row) if row else None
+        return _fetchone(conn, "SELECT * FROM todos WHERE id = %s", (id_,))
